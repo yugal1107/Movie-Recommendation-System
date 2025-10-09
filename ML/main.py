@@ -3,102 +3,133 @@ import pickle
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+import uvicorn
 
 app = FastAPI()
 
-# Load your pre-trained models and encoders from pickle files
-with open('kmeans_model.pkl', 'rb') as f:
-    kmeans_model = pickle.load(f)
-with open('scaler.pkl', 'rb') as f:
-    scaler = pickle.load(f)
-with open('mlb.pkl', 'rb') as f:
-    mlb = pickle.load(f)
+# --- Configuration ---
+KMEANS_MODEL_PATH = 'kmeans_model.pkl'
+SCALER_PATH = 'scaler.pkl'
+MLB_PATH = 'mlb.pkl'
+MOVIES_DATA_PATH = 'movie.csv'
+RELEVANT_COLUMNS = [
+    'rating', '(no genres listed)', 'Action', 'Adventure', 'Animation', 'Children',
+    'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Film-Noir', 'Horror',
+    'IMAX', 'Musical', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'War', 'Western'
+]
 
-# Load the movies dataset.
-movies = pd.read_csv('movie.csv')
-movies['tmdbId'] = pd.to_numeric(movies['tmdbId'], errors='coerce')
-movies['imdbId'] = pd.to_numeric(movies['imdbId'], errors='coerce')
-movies = movies.dropna(subset=['tmdbId', 'imdbId'])
-movies['tmdbId'] = movies['tmdbId'].astype(int)
-movies['imdbId'] = movies['imdbId'].astype(int)
+# --- Model and Data Loading ---
+def load_model(path):
+    """Loads a pickle model from the specified path."""
+    try:
+        with open(path, 'rb') as f:
+            return pickle.load(f)
+    except FileNotFoundError:
+        raise RuntimeError(f"Model file not found at {path}")
+    except Exception as e:
+        raise RuntimeError(f"Error loading model from {path}: {e}")
 
-# def cosine_similarity_custom(A, B):
-#     """
-#     Compute the cosine similarity between each row of A and each row of B.
-    
-#     Parameters:
-#         A (np.ndarray): shape (m, n)
-#         B (np.ndarray): shape (p, n)
-    
-#     Returns:
-#         np.ndarray: similarity matrix of shape (m, p)
-#     """
-#     # Compute dot products between rows of A and rows of B
-#     dot_product = A.dot(B.T)
-#     # Compute the L2 norms for rows of A and B
-#     norm_A = np.linalg.norm(A, axis=1, keepdims=True)
-#     norm_B = np.linalg.norm(B, axis=1, keepdims=True)
-#     # Compute outer product of norms to get denominator
-#     denominator = norm_A.dot(norm_B.T)
-#     # Return elementwise division (handle potential division by zero if necessary)
-#     return dot_product / denominator
+def load_movie_data(path):
+    """Loads and preprocesses the movie dataset from a CSV file."""
+    try:
+        movies = pd.read_csv(path)
+        movies['tmdbId'] = pd.to_numeric(movies['tmdbId'], errors='coerce')
+        movies['imdbId'] = pd.to_numeric(movies['imdbId'], errors='coerce')
+        movies = movies.dropna(subset=['tmdbId', 'imdbId'])
+        movies['tmdbId'] = movies['tmdbId'].astype(int)
+        movies['imdbId'] = movies['imdbId'].astype(int)
+        # Ensure all relevant columns exist
+        for col in RELEVANT_COLUMNS:
+            if col not in movies.columns:
+                movies[col] = 0
+        return movies
+    except FileNotFoundError:
+        raise RuntimeError(f"Movie data file not found at {path}")
+    except Exception as e:
+        raise RuntimeError(f"Error loading movie data from {path}: {e}")
 
-def recommend_movies(movie_tmdb_id, movies_df, kmeans_model, scaler_model, mlb_model, top_n=10):
-    from sklearn.metrics.pairwise import cosine_similarity
-    relevant_columns = ['rating','(no genres listed)', 'Action', 'Adventure', 'Animation', 'Children', 
-                        'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy', 'Film-Noir', 'Horror', 
-                        'IMAX', 'Musical', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'War', 'Western']
-    
-    # Ensure missing feature columns exist
-    for col in relevant_columns:
-        if col not in movies_df.columns:
-            movies_df[col] = 0
+# Load all models and data at startup
+kmeans_model = load_model(KMEANS_MODEL_PATH)
+scaler = load_model(SCALER_PATH)
+mlb = load_model(MLB_PATH)
+movies = load_movie_data(MOVIES_DATA_PATH)
 
-    movie_row = movies_df[movies_df['tmdbId'] == movie_tmdb_id]
+# --- Recommendation Logic ---
+
+def get_movie_features(movie_id, movies_df):
+    """Extracts features for a given movie ID."""
+    movie_row = movies_df[movies_df['tmdbId'] == movie_id]
     if movie_row.empty:
+        return None
+    return movie_row[RELEVANT_COLUMNS].to_numpy()
+
+def get_cluster_movies(cluster_id, movies_df):
+    """Gets all movies from a specific cluster."""
+    return movies_df[movies_df['Cluster'] == cluster_id]
+
+def recommend_movies(movie_tmdb_id, movies_df, kmeans_model, scaler_model, top_n=10):
+    """
+    Recommends movies similar to a given movie.
+
+    Args:
+        movie_tmdb_id (int): The TMDB ID of the movie to get recommendations for.
+        movies_df (pd.DataFrame): The DataFrame of all movies.
+        kmeans_model: The trained KMeans model.
+        scaler_model: The trained scaler model.
+        top_n (int): The number of recommendations to return.
+
+    Returns:
+        pd.DataFrame: A DataFrame of recommended movies.
+    """
+    movie_features = get_movie_features(movie_tmdb_id, movies_df)
+    if movie_features is None:
         return f"Movie with TMDB ID '{movie_tmdb_id}' not found in dataset."
 
-    movie_features = movie_row[relevant_columns].copy()
-    movie_features_np = movie_features.to_numpy()
-    movie_scaled = scaler_model.transform(movie_features_np)
+    movie_scaled = scaler_model.transform(movie_features)
     movie_cluster = kmeans_model.predict(movie_scaled)[0]
-    
-    cluster_movies = movies_df[movies_df['Cluster'] == movie_cluster].copy()
-    for col in relevant_columns:
-        if col not in cluster_movies.columns:
-            cluster_movies[col] = 0
 
-    cluster_movie_features = cluster_movies[relevant_columns].copy()
-    cluster_movie_features_np = cluster_movie_features.to_numpy()
-    # similarities = cosine_similarity_custom(movie_scaled, scaler_model.transform(cluster_movie_features_np)).flatten()
-    similarities = cosine_similarity(movie_scaled, scaler_model.transform(cluster_movie_features_np)).flatten()
+    cluster_movies = get_cluster_movies(movie_cluster, movies_df).copy()
+    cluster_movies.reset_index(drop=True, inplace=True)
+
+
+    # For larger datasets, pre-calculating and storing these features would be more efficient.
+    cluster_movie_features = cluster_movies[RELEVANT_COLUMNS].to_numpy()
+    
+    similarities = cosine_similarity(movie_scaled, scaler_model.transform(cluster_movie_features)).flatten()
     sorted_indices = np.argsort(similarities)[::-1]
-    
-    unique_indices = []
-    for idx in sorted_indices:
-        if idx < len(cluster_movies) and cluster_movies.iloc[idx]['tmdbId'] != movie_tmdb_id:
-            unique_indices.append(idx)
-        if len(unique_indices) >= top_n:
-            break
 
-    if not unique_indices:
+    recommended_movies = []
+    for idx in sorted_indices:
+        if len(recommended_movies) >= top_n:
+            break
+        
+        # Check if idx is within the bounds of the cluster_movies DataFrame
+        if idx < len(cluster_movies):
+            movie_id = cluster_movies.iloc[idx]['tmdbId']
+            if movie_id != movie_tmdb_id:
+                recommended_movies.append(cluster_movies.iloc[idx])
+
+    if not recommended_movies:
         return f"No similar movies found for TMDB ID '{movie_tmdb_id}'. Try a different movie."
-    
-    # Obtain recommendations and drop duplicates by tmdbId
-    similar_movies = cluster_movies.iloc[unique_indices][['tmdbId', 'rating']]
-    similar_movies = similar_movies.drop_duplicates(subset='tmdbId')
-    return similar_movies
+
+    return pd.DataFrame(recommended_movies)[['tmdbId', 'rating']].drop_duplicates(subset='tmdbId')
+
+
+# --- API Endpoints ---
 
 @app.get("/recommend")
 async def get_recommendations(
     tmdb_id: int = Query(..., description="TMDB ID of the movie"),
     top_n: int = Query(10, description="Number of recommendations to return")
 ):
-    result = recommend_movies(tmdb_id, movies, kmeans_model, scaler, mlb, top_n=top_n)
+    """
+    Get movie recommendations based on a given TMDB movie ID.
+    """
+    result = recommend_movies(tmdb_id, movies, kmeans_model, scaler, top_n=top_n)
     if isinstance(result, str):
         raise HTTPException(status_code=404, detail=result)
     return result.to_dict(orient='records')
 
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=8000)
+# To run the app: uvicorn main:app --reload
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
