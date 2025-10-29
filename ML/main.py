@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import pickle
 import pandas as pd
 import numpy as np
@@ -6,6 +7,15 @@ from sklearn.metrics.pairwise import cosine_similarity
 import uvicorn
 
 app = FastAPI()
+
+# --- CORS Middleware ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 # --- Configuration ---
 KMEANS_MODEL_PATH = 'kmeans_model.pkl'
