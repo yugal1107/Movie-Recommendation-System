@@ -82,6 +82,23 @@ This project uses the following primary libraries:
    http://localhost:8000/recommend?tmdb_id=862&top_n=10
    ```
 
+## Running via Docker (Recommended)
+
+You can run the pre-built, highly-optimized Docker image directly from the GitHub Container Registry without needing to set up a local Python environment.
+
+```bash
+docker run -d -p 8000:8000 --name movie-rec ghcr.io/yugal1107/movie-recommendation-api:latest
+```
+
+The API will instantly be available at [http://localhost:8000](http://localhost:8000).
+
+### Managing the Container using `make`
+If you want to build and run the image locally, a `Makefile` is included to simplify Docker commands:
+- `make up` - Stops old containers, builds the image, and runs it
+- `make stop` - Stops the running container
+- `make logs` - Follows the container logs
+- `make publish` - Pushes the built image to GitHub Container Registry
+
 ## Additional Information
 
 - **Dependency Management:**  

@@ -1,8 +1,10 @@
-.PHONY: build run stop clean up logs
+.PHONY: build run stop clean up logs publish
 
+GITHUB_USERNAME = yugal1107
 IMAGE_NAME = movie-recommendation-api
 CONTAINER_NAME = movie-rec
 PORT = 8000
+GHCR_IMAGE = ghcr.io/$(GITHUB_USERNAME)/$(IMAGE_NAME):latest
 
 # Build the Docker image
 build:
@@ -26,3 +28,9 @@ up: clean build run
 # Follow the container logs
 logs:
 	docker logs -f $(CONTAINER_NAME)
+
+# Publish to GitHub Container Registry (GHCR)
+publish: build
+	@echo "Make sure you have logged in to GHCR: echo <YOUR_PAT> | docker login ghcr.io -u $(GITHUB_USERNAME) --password-stdin"
+	docker tag $(IMAGE_NAME) $(GHCR_IMAGE)
+	docker push $(GHCR_IMAGE)
