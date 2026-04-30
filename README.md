@@ -28,7 +28,10 @@ Movie-Recommendation-System/
     ├── kmeans_model.pkl      # Pre-trained KMeans model
     ├── scaler.pkl            # Pre-trained StandardScaler
     ├── mlb.pkl               # Pre-trained MultiLabelBinarizer for genre encoding
-    ├── requirements.txt      # Project Python dependencies
+    ├── pyproject.toml        # Project configuration and dependencies
+    ├── uv.lock               # Locked dependency versions
+    ├── Dockerfile            # Docker configuration
+    ├── vercel.json           # Vercel deployment configuration
     └── .gitignore            # Git ignore configuration
 ```
 
@@ -50,32 +53,22 @@ This project uses the following primary libraries:
    cd Movie-Recommendation-System/ML
    ```
 
-2. **Create and Activate the Virtual Environment:**
-
+2. **Install Project Dependencies:**
+   Ensure you have [`uv`](https://docs.astral.sh/uv/) installed, then run:
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate        # For Linux/macOS
-   venv\Scripts\activate           # For Windows
+   uv sync
    ```
 
-3. **Install Project Dependencies:**
+3. **Run the Application Locally:**
 
+   Start the FastAPI application using `uv run`:
    ```bash
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
-
-4. **Run the Application Locally:**
-
-   Start the FastAPI application using uvicorn:
-
-   ```bash
-   uvicorn main:app --reload
+   uv run uvicorn main:app --reload
    ```
 
    The API will be available at [http://localhost:8000](http://localhost:8000).
 
-5. **API Endpoint:**
+4. **API Endpoint:**
 
    To retrieve movie recommendations, send a GET request to the following endpoint:
    
@@ -90,6 +83,12 @@ This project uses the following primary libraries:
    ```
 
 ## Additional Information
+
+- **Dependency Management:**  
+  This project uses `uv` and `pyproject.toml` for dependency management. The old `requirements.txt` has been removed in favor of `pyproject.toml` and `uv.lock`.
+
+- **Performance Optimizations:**  
+  The system now pre-computes scaled features and uses deduplicated movie data (grouped by TMDB ID) for near-instant recommendations.
 
 - **Warnings:**  
   You might see warnings related to mismatched scikit‑learn versions when loading pickled models. These are informational and do not affect functionality, but aligning versions between training and serving environments is recommended.
