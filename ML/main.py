@@ -48,10 +48,24 @@ def load_movie_data(path):
         movies = movies.dropna(subset=['tmdbId', 'imdbId'])
         movies['tmdbId'] = movies['tmdbId'].astype(int)
         movies['imdbId'] = movies['imdbId'].astype(int)
+        
         # Ensure all relevant columns exist
         for col in RELEVANT_COLUMNS:
             if col not in movies.columns:
                 movies[col] = 0
+
+        # Optimization: The CSV contains multiple user ratings per movie.
+        # This causes the DataFrame to be 100k+ rows instead of ~9k unique movies.
+        # We group by tmdbId so each movie has exactly 1 row, averaging the rating.
+        agg_funcs = {col: 'max' for col in RELEVANT_COLUMNS if col != 'rating'}
+        agg_funcs['rating'] = 'mean'
+        # Keep necessary metadata columns
+        for col in ['imdbId', 'title']:
+            if col in movies.columns:
+                agg_funcs[col] = 'first'
+        
+        movies = movies.groupby('tmdbId', as_index=False).agg(agg_funcs)
+
         return movies
     except FileNotFoundError:
         raise RuntimeError(f"Movie data file not found at {path}")
@@ -64,6 +78,14 @@ scaler = load_model(SCALER_PATH)
 mlb = load_model(MLB_PATH)
 movies = load_movie_data(MOVIES_DATA_PATH)
 
+# Pre-compute scaled features and clusters to save time during requests
+print("Pre-computing features for faster recommendations...")
+_all_features = movies[RELEVANT_COLUMNS].to_numpy()
+_scaled_features = scaler.transform(_all_features)
+movies['Cluster'] = kmeans_model.predict(_scaled_features)
+# Store the scaled features directly in the dataframe for instant lookup
+movies['scaled_features'] = list(_scaled_features)
+
 # --- Recommendation Logic ---
 
 def get_movie_features(movie_id, movies_df):
@@ -71,7 +93,7 @@ def get_movie_features(movie_id, movies_df):
     movie_row = movies_df[movies_df['tmdbId'] == movie_id]
     if movie_row.empty:
         return None
-    return movie_row[RELEVANT_COLUMNS].to_numpy()
+    return movie_row.iloc[0]['scaled_features'].reshape(1, -1)
 
 def get_cluster_movies(cluster_id, movies_df):
     """Gets all movies from a specific cluster."""
@@ -91,21 +113,20 @@ def recommend_movies(movie_tmdb_id, movies_df, kmeans_model, scaler_model, top_n
     Returns:
         pd.DataFrame: A DataFrame of recommended movies.
     """
-    movie_features = get_movie_features(movie_tmdb_id, movies_df)
-    if movie_features is None:
+    movie_scaled = get_movie_features(movie_tmdb_id, movies_df)
+    if movie_scaled is None:
         return f"Movie with TMDB ID '{movie_tmdb_id}' not found in dataset."
 
-    movie_scaled = scaler_model.transform(movie_features)
-    movie_cluster = kmeans_model.predict(movie_scaled)[0]
+    # Using the pre-calculated cluster
+    movie_cluster = movies_df[movies_df['tmdbId'] == movie_tmdb_id].iloc[0]['Cluster']
 
     cluster_movies = get_cluster_movies(movie_cluster, movies_df).copy()
     cluster_movies.reset_index(drop=True, inplace=True)
 
-
-    # For larger datasets, pre-calculating and storing these features would be more efficient.
-    cluster_movie_features = cluster_movies[RELEVANT_COLUMNS].to_numpy()
+    # Use the pre-calculated scaled features
+    cluster_scaled_features = np.stack(cluster_movies['scaled_features'].values)
     
-    similarities = cosine_similarity(movie_scaled, scaler_model.transform(cluster_movie_features)).flatten()
+    similarities = cosine_similarity(movie_scaled, cluster_scaled_features).flatten()
     sorted_indices = np.argsort(similarities)[::-1]
 
     recommended_movies = []
@@ -122,7 +143,12 @@ def recommend_movies(movie_tmdb_id, movies_df, kmeans_model, scaler_model, top_n
     if not recommended_movies:
         return f"No similar movies found for TMDB ID '{movie_tmdb_id}'. Try a different movie."
 
-    return pd.DataFrame(recommended_movies)[['tmdbId', 'rating']].drop_duplicates(subset='tmdbId')
+    # Return without the massive scaled_features array
+    result_df = pd.DataFrame(recommended_movies)[['tmdbId', 'rating']]
+    if 'title' in cluster_movies.columns:
+        result_df['title'] = pd.DataFrame(recommended_movies)['title']
+        
+    return result_df.drop_duplicates(subset='tmdbId')
 
 
 # --- API Endpoints ---
