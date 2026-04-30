@@ -1,5 +1,6 @@
-# Ignore Python virtual environment
+# Ignore Python virtual environments
 venv/
+.venv/
 __pycache__/
 
 # Ignore Git directory
@@ -8,6 +9,7 @@ __pycache__/
 
 # Ignore Dockerfile
 Dockerfile
+.dockerignore
 
 # Ignore Jupyter notebook checkpoints
 .ipynb_checkpoints/
